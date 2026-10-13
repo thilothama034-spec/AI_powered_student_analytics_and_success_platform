@@ -1,15 +1,18 @@
 import csv
 import io
 import os
+import secrets
 import sqlite3 
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Body, FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -23,6 +26,10 @@ from pydantic import (
 PROJECT_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = Path(os.getenv("STUDENT_DB_PATH", PROJECT_DIR / "students.db"))
 DATASET_PATH = PROJECT_DIR / "src" / "main" / "resources" / "data" / "students.csv"
+FRONTEND_DIST = PROJECT_DIR / "frontend" / "dist"
+APP_USERNAME = os.getenv("APP_USERNAME")
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+basic_auth = HTTPBasic(auto_error=False)
 
 
 class StudentInput(BaseModel):
@@ -76,6 +83,10 @@ class DeleteStudentResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if bool(APP_USERNAME) != bool(APP_PASSWORD):
+        raise RuntimeError("Set both APP_USERNAME and APP_PASSWORD, or neither.")
+    if os.getenv("RENDER", "").lower() == "true" and not APP_USERNAME:
+        raise RuntimeError("APP_USERNAME and APP_PASSWORD are required on Render.")
     init_db()
     yield
 
@@ -104,6 +115,28 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    if request.url.path == "/api/health" or not APP_USERNAME:
+        return await call_next(request)
+
+    credentials = await basic_auth(request)
+    if not credentials or not (
+        APP_PASSWORD
+        and secrets.compare_digest(
+            credentials.username.encode("utf-8"), APP_USERNAME.encode("utf-8")
+        )
+        and secrets.compare_digest(
+            credentials.password.encode("utf-8"), APP_PASSWORD.encode("utf-8")
+        )
+    ):
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Student Success"'},
+        )
+    return await call_next(request)
 
 
 def load_dataset() -> list[StudentInput]:
@@ -470,3 +503,32 @@ def download_dataset():
         media_type="text/csv",
         filename="students.csv",
     )
+
+
+@app.get("/api/health", tags=["Health"])
+def health_check():
+    with sqlite3.connect(DATABASE_PATH) as conn:
+        conn.execute("SELECT 1")
+    return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+def frontend_index():
+    index_file = FRONTEND_DIST / "index.html"
+    if not index_file.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="Frontend build is missing. Build the frontend before starting the web app.",
+        )
+    return FileResponse(index_file)
+
+
+app.mount(
+    "/",
+    app=StaticFiles(
+        directory=FRONTEND_DIST,
+        html=True,
+        check_dir=False,
+    ),
+    name="frontend",
+)

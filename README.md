@@ -108,3 +108,25 @@ authorized need and appropriate privacy protections.
 cd frontend
 npm run build
 ```
+
+## Deploy on Render
+
+The root-level `render.yaml` deploys the React frontend and FastAPI API together
+as one Docker web service. The blueprint includes a persistent disk for SQLite
+and requires a paid Render instance; do not change it to an ephemeral free
+instance when using real student records.
+
+1. Push this project to the connected GitHub repository.
+2. In Render, create a Blueprint from that repository and select the `demo`
+   branch (or the branch containing `render.yaml`).
+3. Set `APP_USERNAME` and `APP_PASSWORD` as secrets when Render requests them.
+   Use a unique, strong password and do not commit either value to GitHub.
+4. Deploy the Blueprint. Render supplies the public HTTPS URL; the dashboard
+   and API documentation are served from that same URL.
+
+The dashboard and API require HTTP Basic authentication on Render. The
+`/api/health` endpoint is intentionally public so Render can monitor the
+service. Locally, authentication is disabled unless both `APP_USERNAME` and
+`APP_PASSWORD` are set. This is a single shared login, not per-user accounts or
+an audit trail; confirm your institution's privacy and access-control
+requirements before entering identifiable student data.

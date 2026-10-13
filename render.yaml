@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: student-success-platform
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: student-success-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APP_USERNAME
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: STUDENT_DB_PATH
+        value: /var/data/students.db
